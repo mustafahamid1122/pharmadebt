@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#047857">
+<title>ديون الصيدلية</title>
+<style>
+:root{--bg:#f1f5f9;--card:#fff;--tx:#1e293b;--mut:#64748b;--bd:#e2e8f0;--pri:#059669;--red:#be123c;--amb:#d97706}
+@media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--tx:#f1f5f9;--mut:#94a3b8;--bd:#334155}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--tx);padding:env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 70px)}
+.wrap{max-width:480px;margin:0 auto;padding:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:14px;margin-bottom:10px}
+h1,h2,h3{margin:0}
+input,select,button{font:inherit;width:100%;padding:11px;border-radius:12px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);margin-top:8px}
+button{background:var(--pri);color:#fff;border:0;font-weight:700;cursor:pointer}
+button.sec{background:var(--bd);color:var(--tx)} button.red{background:var(--red)} button.amb{background:var(--amb)}
+button.sm{width:auto;padding:6px 12px;margin:0;font-size:13px}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.tabs{display:flex;gap:6px}.tabs button{margin:0;background:var(--bd);color:var(--tx);font-size:13px}.tabs .on{background:var(--pri);color:#fff}
+.top{background:linear-gradient(to left,#047857,#0d9488);color:#fff;padding:14px 12px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px;text-align:center;font-size:12px}
+.stats div{background:#ffffff26;border-radius:10px;padding:6px}.stats b{display:block;font-size:13px}
+.badge{padding:3px 9px;border-radius:9px;font-size:12px;font-weight:700;background:#fef3c7;color:#92400e}
+.badge.ok{background:#d1fae5;color:#065f46}.badge.late{background:#ffe4e6;color:#9f1239}
+.mut{color:var(--mut);font-size:13px}.err{color:var(--red);font-size:13px;margin-top:8px}
+.bar{position:fixed;bottom:0;inset-inline:0;background:var(--card);border-top:1px solid var(--bd);padding:8px 12px calc(env(safe-area-inset-bottom) + 8px)}
+.bar .wrap{padding:0;display:flex;gap:8px}.bar button{margin:0}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const SB_URL = 'https://gsftoyjqolqapfypbrlj.supabase.co';
+const SB_KEY = 'sb_publishable_bouA5kYTi7JhrXHIoHSstQ_cEkFFip3';
+const sb = supabase.createClient(SB_URL, SB_KEY);
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => Number(n || 0).toLocaleString('en-US') + ' د.ع';
+const today = () => new Date().toISOString().slice(0, 10);
+const toEmail = p => p.replace(/\D/g, '') + '@pharmacy.app';
+let me = null, debtors = [], view = 'list', current = null, authMode = 'login', msg = '', q = '';
+const isMgr = () => me && me.role === 'manager';
+
+async function boot() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await loadMe();
+  render();
+}
+async function loadMe() {
+  const { data } = await sb.from('profiles').select('*, pharmacies(*)').eq('id', (await sb.auth.getUser()).data.user.id).maybeSingle();
+  me = data && data.active ? data : null;
+  if (me) await loadDebtors();
+}
+async function loadDebtors() {
+  const { data } = await sb.from('debtor_summary').select('*').order('created_at', { ascending: false });
+  debtors = data || [];
+}
+function go(v, d) { view = v; current = d || null; msg = ''; render(); }
+
+function render() {
+  const app = $('app');
+  if (!me) return app.innerHTML = authHtml(), bindAuth();
+  if (view === 'list') return listHtml(app);
+  if (view === 'new') return newHtml(app);
+  if (view === 'detail') return detailHtml(app);
+  if (view === 'staff') return staffHtml(app);
+}
+
+/* ---------- Auth ---------- */
+function authHtml() {
+  const t = (m, l) => `<button type="button" class="${authMode === m ? 'on' : ''}" data-m="${m}">${l}</button>`;
+  return `<div class="wrap"><div class="card"><h2>💊 ديون الصيدلية</h2>
+  <div class="tabs" style="margin-top:12px">${t('login', 'دخول')}${t('register', 'صيدلية جديدة')}${t('join', 'انضمام بكود')}</div>
+  <form id="af">
+  ${authMode !== 'login' ? '<input id="fn" required placeholder="اسمك الكامل">' : ''}
+  ${authMode === 'register' ? '<input id="pn" required placeholder="اسم الصيدلية"><input id="wa" placeholder="واتساب الصيدلية" inputmode="tel">' : ''}
+  ${authMode === 'join' ? '<input id="cd" required placeholder="كود الدعوة من المدير" dir="ltr">' : ''}
+  <input id="ph" required placeholder="رقم الهاتف" inputmode="tel" dir="ltr">
+  <input id="pw" required type="password" placeholder="كلمة المرور (6 أحرف على الأقل)" dir="ltr" minlength="6">
+  <button type="submit">${authMode === 'login' ? 'دخول' : 'إنشاء الحساب'}</button></form>
+  <div class="err">${esc(msg)}</div></div></div>`;
+}
+function bindAuth() {
+  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { authMode = b.dataset.m; msg = ''; render(); });
+  $('af').onsubmit = async e => {
+    e.preventDefault(); msg = '';
+    const phone = $('ph').value.trim(), pw = $('pw').value, email = toEmail(phone);
+    try {
+      if (authMode === 'login') {
+        const { error } = await sb.auth.signInWithPassword({ email, password: pw });
+        if (error) throw new Error('رقم الهاتف أو كلمة المرور غير صحيحة');
+      } else {
+        const { data, error } = await sb.auth.signUp({ email, password: pw });
+        if (error) throw new Error(error.message);
+        if (!data.session) throw new Error('فعّل الدخول المباشر: عطّل Confirm email في Supabase');
+        const fn = $('fn').value.trim();
+        const r = authMode === 'register'
+          ? await sb.rpc('register_pharmacy', { p_pharmacy_name: $('pn').value.trim(), p_full_name: fn, p_phone: phone, p_whatsapp: $('wa').value.trim(), p_address: '' })
+          : await sb.rpc('join_pharmacy', { p_code: $('cd').value, p_full_name: fn, p_phone: phone });
+        if (r.error) throw new Error(r.error.message.includes('invalid code') ? 'كود الدعوة غير صحيح' : r.error.message);
+      }
+      await loadMe(); view = 'list';
+      if (!me) { msg = 'الحساب غير مفعّل'; await sb.auth.signOut(); }
+    } catch (err) { msg = err.message; }
+    render();
+  };
+}
+
+/* ---------- List ---------- */
+function listHtml(app) {
+  const rem = debtors.reduce((s, d) => s + Number(d.remaining), 0);
+  const paid = debtors.reduce((s, d) => s + Number(d.total_paid), 0);
+  const late = debtors.filter(d => d.remaining > 0 && d.due_date && d.due_date < today()).length;
+  const f = debtors.filter(d => !q || (d.name + d.phone).toLowerCase().includes(q.toLowerCase()));
+  app.innerHTML = `<div class="top"><div class="wrap" style="padding:0"><div class="row"><div><h3>${esc(me.pharmacies.name)}</h3><div style="font-size:12px;opacity:.85">${esc(me.full_name)} • ${isMgr() ? 'مدير 👑' : 'موظف'}</div></div>
+  <button class="sm sec" id="lo">خروج</button></div>
+  <div class="stats"><div>المتبقي<b>${fmt(rem)}</b></div><div>المسدد<b>${fmt(paid)}</b></div><div>متأخر<b>${late}</b></div></div></div></div>
+  <div class="wrap"><input id="qs" placeholder="🔍 ابحث بالاسم أو الهاتف" value="${esc(q)}">
+  <div style="margin-top:10px">${f.map(d => {
+    const lt = d.remaining > 0 && d.due_date && d.due_date < today();
+    return `<div class="card" data-d="${d.id}" style="cursor:pointer"><div class="row"><b>${esc(d.name)}</b>
+    <span class="badge ${d.remaining == 0 ? 'ok' : lt ? 'late' : ''}">${d.remaining == 0 ? 'مسدد ✓' : fmt(d.remaining)}</span></div>
+    <div class="mut" dir="ltr" style="text-align:right">${esc(d.phone)}${d.due_date ? ' • ' + esc(d.due_date) : ''}</div></div>`;
+  }).join('') || '<div class="card mut">لا توجد سجلات</div>'}</div></div>
+  <div class="bar"><div class="wrap"><button id="nw">+ دين جديد</button>${isMgr() ? '<button class="sec" id="sf" style="width:40%">الموظفون</button>' : ''}</div></div>`;
+  $('lo').onclick = async () => { await sb.auth.signOut(); me = null; render(); };
+  $('nw').onclick = () => go('new');
+  if (isMgr()) $('sf').onclick = () => go('staff');
+  $('qs').oninput = e => { q = e.target.value; const p = e.target.selectionStart; render(); $('qs').focus(); $('qs').setSelectionRange(p, p); };
+  app.querySelectorAll('[data-d]').forEach(c => c.onclick = () => go('detail', debtors.find(d => d.id === c.dataset.d)));
+}
+
+/* ---------- New debtor ---------- */
+function newHtml(app) {
+  app.innerHTML = `<div class="wrap"><div class="card"><div class="row"><h3>دين جديد</h3><button class="sm sec" id="bk">رجوع</button></div>
+  <form id="nf"><input id="n" required placeholder="اسم الزبون"><input id="p" required placeholder="رقم الهاتف" inputmode="tel" dir="ltr">
+  <input id="a" required type="number" min="250" step="250" placeholder="المبلغ (د.ع)" inputmode="numeric">
+  <label class="mut">موعد السداد</label><input id="du" type="date" value="${today()}">
+  <input id="no" placeholder="الأدوية / ملاحظات"><button type="submit">حفظ</button></form><div class="err">${esc(msg)}</div></div></div>`;
+  $('bk').onclick = () => go('list');
+  $('nf').onsubmit = async e => {
+    e.preventDefault();
+    const base = { pharmacy_id: me.pharmacy_id, created_by: me.id };
+    const { data: d, error } = await sb.from('debtors').insert({ ...base, name: $('n').value.trim(), phone: $('p').value.trim(), due_date: $('du').value || null }).select().single();
+    if (error) { msg = error.message; return render(); }
+    const t = await sb.from('transactions').insert({ ...base, debtor_id: d.id, type: 'debt', amount: Number($('a').value), due_date: $('du').value || null, notes: $('no').value.trim() || null });
+    if (t.error) { msg = t.error.message; return render(); }
+    await loadDebtors(); go('list');
+  };
+}
+
+/* ---------- Detail ---------- */
+async function detailHtml(app) {
+  app.innerHTML = '<div class="wrap"><div class="card mut">جاري التحميل...</div></div>';
+  const d = current;
+  const { data: txs } = await sb.from('transactions').select('*, profiles(full_name)').eq('debtor_id', d.id).order('created_at', { ascending: false });
+  const wa = d.phone.replace(/\D/g, '').replace(/^0/, '964');
+  const text = `السلام عليكم ${d.name} 🌿\nتذكير بلطف من ${me.pharmacies.name}: المتبقي عليكم ${fmt(d.remaining)}.\nشكراً لتعاونكم.`;
+  app.innerHTML = `<div class="wrap"><div class="card"><div class="row"><h3>${esc(d.name)}</h3><button class="sm sec" id="bk">رجوع</button></div>
+  <div class="mut" dir="ltr" style="text-align:right">${esc(d.phone)}</div>
+  <div class="stats" style="color:var(--tx)"><div style="background:var(--bg)">الدين<b>${fmt(d.total_debt)}</b></div><div style="background:var(--bg)">المسدد<b>${fmt(d.total_paid)}</b></div><div style="background:var(--bg)">المتبقي<b>${fmt(d.remaining)}</b></div></div>
+  <form id="tf"><select id="ty"><option value="payment">تسديد دفعة</option><option value="debt">إضافة دين</option></select>
+  <input id="am" required type="number" min="250" step="250" placeholder="المبلغ" inputmode="numeric"><input id="nt" placeholder="ملاحظات"><button type="submit">حفظ العملية</button></form>
+  ${d.remaining > 0 ? `<a href="https://wa.me/${wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener"><button type="button" class="amb">💬 تذكير واتساب</button></a>` : ''}
+  ${isMgr() ? '<button class="red" id="dd">🗑️ حذف الزبون (مدير)</button>' : ''}<div class="err">${esc(msg)}</div></div>
+  ${(txs || []).map(t => `<div class="card"><div class="row"><span class="badge ${t.type === 'payment' ? 'ok' : 'late'}">${t.type === 'payment' ? 'دفعة' : 'دين'}</span><b>${fmt(t.amount)}</b></div>
+  <div class="mut">${esc(t.notes || '—')}<br>${esc(t.tx_date)} • ${esc(t.profiles ? t.profiles.full_name : '')}</div>
+  ${isMgr() ? `<button class="sm red" data-x="${t.id}" style="margin-top:8px">حذف</button>` : ''}</div>`).join('')}</div>`;
+  $('bk').onclick = async () => { await loadDebtors(); go('list'); };
+  const refresh = async () => { await loadDebtors(); current = debtors.find(x => x.id === d.id); current ? render() : go('list'); };
+  $('tf').onsubmit = async e => {
+    e.preventDefault();
+    const { error } = await sb.from('transactions').insert({ pharmacy_id: me.pharmacy_id, debtor_id: d.id, created_by: me.id, type: $('ty').value, amount: Number($('am').value), notes: $('nt').value.trim() || null });
+    if (error) { msg = error.message; return render(); }
+    refresh();
+  };
+  app.querySelectorAll('[data-x]').forEach(b => b.onclick = async () => {
+    if (!confirm('حذف هذه العملية؟')) return;
+    await sb.from('transactions').delete().eq('id', b.dataset.x); refresh();
+  });
+  if (isMgr()) $('dd').onclick = async () => {
+    if (!confirm('حذف الزبون وكل سجلاته؟')) return;
+    await sb.from('debtors').delete().eq('id', d.id); await loadDebtors(); go('list');
+  };
+}
+
+/* ---------- Staff (manager) ---------- */
+async function staffHtml(app) {
+  const { data: st } = await sb.from('profiles').select('*').order('created_at');
+  app.innerHTML = `<div class="wrap"><div class="card"><div class="row"><h3>الموظفون</h3><button class="sm sec" id="bk">رجوع</button></div>
+  <p class="mut">أعطِ الموظف هذا الكود، ويسجل من تبويب «انضمام بكود»:</p>
+  <div class="card" style="text-align:center;font-size:22px;font-weight:800;letter-spacing:2px" dir="ltr">${esc(me.pharmacies.invite_code)}</div></div>
+  ${(st || []).map(s => `<div class="card"><div class="row"><div><b>${esc(s.full_name)}</b> <span class="badge ${s.role === 'manager' ? '' : 'ok'}">${s.role === 'manager' ? 'مدير' : 'موظف'}</span>
+  <div class="mut" dir="ltr" style="text-align:right">${esc(s.phone || '')}</div></div>
+  ${s.id !== me.id ? `<button class="sm ${s.active ? 'red' : ''}" data-t="${s.id}" data-a="${s.active}">${s.active ? 'إيقاف' : 'تفعيل'}</button>` : '<span class="mut">أنت</span>'}</div></div>`).join('')}</div>`;
+  $('bk').onclick = () => go('list');
+  app.querySelectorAll('[data-t]').forEach(b => b.onclick = async () => {
+    await sb.from('profiles').update({ active: b.dataset.a !== 'true' }).eq('id', b.dataset.t); render();
+  });
+}
+
+boot();
+</script>
+</body>
+</html>
