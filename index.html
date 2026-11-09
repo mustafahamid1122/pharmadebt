@@ -360,16 +360,48 @@ async function reportHtml(app) {
   app.querySelectorAll('[data-rg]').forEach(b => b.onclick = () => { rpRange = b.dataset.rg; render(); });
 }
 
+/* ---------- Backup (manager) ---------- */
+async function backup(kind) {
+  $('bm').textContent = 'جاري التجهيز...';
+  const [d, t] = await Promise.all([
+    sb.from('debtors').select('*').limit(50000),
+    sb.from('transactions').select('*, profiles(full_name)').limit(50000)
+  ]);
+  if (d.error || t.error) { $('bm').textContent = 'تعذر تنزيل النسخة، حاول مرة ثانية'; return; }
+  let blob, ext;
+  if (kind === 'json') {
+    blob = new Blob([JSON.stringify({ exported_at: new Date().toISOString(), pharmacy: me.pharmacies.name, debtors: d.data, transactions: t.data }, null, 2)], { type: 'application/json' });
+    ext = 'json';
+  } else {
+    const byId = Object.fromEntries(d.data.map(x => [x.id, x]));
+    const cell = v => { const s = String(v ?? ''); return '"' + (/^[=+\-@]/.test(s) ? "'" + s : s).replace(/"/g, '""') + '"'; };
+    const rows = [['الزبون', 'الهاتف', 'التاريخ', 'النوع', 'المبلغ', 'الملاحظات', 'الموظف']];
+    t.data.forEach(x => {
+      const z = byId[x.debtor_id] || {};
+      rows.push([z.name, z.phone, x.tx_date, x.type === 'debt' ? 'دين' : 'دفعة', x.amount, x.notes, x.profiles ? x.profiles.full_name : '']);
+    });
+    blob = new Blob(['\uFEFF' + rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+    ext = 'csv';
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `pharmacy-backup-${today()}.${ext}`; a.click();
+  $('bm').textContent = 'تم تجهيز الملف ✓';
+}
+
 /* ---------- Staff (manager) ---------- */
 async function staffHtml(app) {
   const { data: st } = await sb.from('profiles').select('*').order('created_at');
   app.innerHTML = `<div class="wrap"><div class="card"><div class="row"><h3>الموظفون</h3><button class="sm sec" id="bk">رجوع</button></div>
   <p class="mut">أعطِ الموظف هذا الكود، ويسجل من تبويب «انضمام بكود»:</p>
   <div class="card" style="text-align:center;font-size:22px;font-weight:800;letter-spacing:2px" dir="ltr">${esc(me.pharmacies.invite_code)}</div></div>
+  <div class="card"><h3>💾 نسخة احتياطية</h3><p class="mut">نزّل نسخة من كل الديون والعمليات واحتفظ بها بمكان آمن (مثلاً كل أسبوع).</p>
+  <button id="bj">تنزيل نسخة كاملة (JSON)</button><button id="bc" class="sec">تنزيل جدول Excel (CSV)</button><div class="mut" id="bm" style="margin-top:8px"></div></div>
   ${(st || []).map(s => `<div class="card"><div class="row"><div><b>${esc(s.full_name)}</b> <span class="badge ${s.role === 'manager' ? '' : 'ok'}">${s.role === 'manager' ? 'مدير' : 'موظف'}</span>
   <div class="mut" dir="ltr" style="text-align:right">${esc(s.phone || '')}</div></div>
   ${s.id !== me.id ? `<button class="sm ${s.active ? 'red' : ''}" data-t="${s.id}" data-a="${s.active}">${s.active ? 'إيقاف' : 'تفعيل'}</button>` : '<span class="mut">أنت</span>'}</div></div>`).join('')}</div>`;
   $('bk').onclick = () => go('list');
+  $('bj').onclick = () => backup('json');
+  $('bc').onclick = () => backup('csv');
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = async () => {
     await sb.from('profiles').update({ active: b.dataset.a !== 'true' }).eq('id', b.dataset.t); render();
   });
