@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#047857">
 <title>ديون الصيدلية</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ديون الصيدلية">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#f1f5f9;--card:#fff;--tx:#1e293b;--mut:#64748b;--bd:#e2e8f0;--pri:#059669;--red:#be123c;--amb:#d97706}
 @media(prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--tx:#f1f5f9;--mut:#94a3b8;--bd:#334155}}
@@ -27,6 +34,23 @@ button.sm{width:auto;padding:6px 12px;margin:0;font-size:13px}
 .mut{color:var(--mut);font-size:13px}.err{color:var(--red);font-size:13px;margin-top:8px}
 .bar{position:fixed;bottom:0;inset-inline:0;background:var(--card);border-top:1px solid var(--bd);padding:8px 12px calc(env(safe-area-inset-bottom) + 8px)}
 .bar .wrap{padding:0;display:flex;gap:8px}.bar button{margin:0}
+body{font-family:Tajawal,system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif}
+.card{box-shadow:0 1px 3px #0000000f;transition:transform .12s}
+.card[data-d]:active{transform:scale(.98)}
+.top{border-radius:0 0 24px 24px;box-shadow:0 6px 18px #04785533}
+.stats div{backdrop-filter:blur(6px)}
+input:focus,select:focus{outline:2px solid #05966966;border-color:var(--pri)}
+button:active{opacity:.85;transform:scale(.98)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.logo{width:44px;height:44px;border-radius:12px;flex:none}
+.hero{text-align:center;padding:30px 0 10px}
+.hero .logo{width:80px;height:80px;border-radius:22px;box-shadow:0 8px 24px #04785555}
+.hero h1{font-size:26px;margin-top:12px}.hero p{color:var(--mut);margin:6px 0 0;font-size:14px}
+.item{display:flex;gap:12px;align-items:center}
+.item .mid{flex:1;min-width:0}.item .mid b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.av{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#059669,#0d9488);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;flex:none}
+.av.late{background:linear-gradient(135deg,#e11d48,#be123c)}.av.ok{background:linear-gradient(135deg,#94a3b8,#64748b)}
+.empty{text-align:center;padding:40px 12px;color:var(--mut);line-height:1.8}.empty .big{font-size:46px}
 @media print{body>*:not(#stm){display:none!important}#stm{position:static!important;background:#fff!important;padding:0!important}.noprint{display:none!important}}
 </style>
 </head>
@@ -44,6 +68,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const toEmail = p => p.replace(/\D/g, '') + '@pharmacy.app';
 let me = null, debtors = [], view = 'list', current = null, authMode = 'login', msg = '', q = '';
 const isMgr = () => me && me.role === 'manager';
+const LOGO = '<svg class="logo" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#059669"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><rect x="26" y="12" width="12" height="40" rx="4" fill="#fff"/><rect x="12" y="26" width="40" height="12" rx="4" fill="#fff"/><circle cx="48" cy="48" r="9" fill="#f59e0b" stroke="#fff" stroke-width="3"/></svg>';
 
 async function boot() {
   const { data: { session } } = await sb.auth.getSession();
@@ -111,7 +136,7 @@ async function showReceipt(path) {
 /* ---------- Auth ---------- */
 function authHtml() {
   const t = (m, l) => `<button type="button" class="${authMode === m ? 'on' : ''}" data-m="${m}">${l}</button>`;
-  return `<div class="wrap"><div class="card"><h2>💊 ديون الصيدلية</h2>
+  return `<div class="wrap"><div class="hero">${LOGO}<h1>ديون الصيدلية</h1><p>سجّل ديون زبائنك وتابع التسديد بسهولة</p></div><div class="card">
   <div class="tabs" style="margin-top:12px">${t('login', 'دخول')}${t('register', 'صيدلية جديدة')}${t('join', 'انضمام بكود')}</div>
   <form id="af">
   ${authMode !== 'login' ? '<input id="fn" required placeholder="اسمك الكامل">' : ''}
@@ -156,16 +181,16 @@ function listHtml(app) {
   const paid = debtors.reduce((s, d) => s + Number(d.total_paid), 0);
   const late = debtors.filter(d => d.remaining > 0 && d.due_date && d.due_date < today()).length;
   const f = debtors.filter(d => !q || (d.name + d.phone).toLowerCase().includes(q.toLowerCase()));
-  app.innerHTML = `<div class="top"><div class="wrap" style="padding:0"><div class="row"><div><h3>${esc(me.pharmacies.name)}</h3><div style="font-size:12px;opacity:.85">${esc(me.full_name)} • ${isMgr() ? 'مدير 👑' : 'موظف'}</div></div>
+  app.innerHTML = `<div class="top"><div class="wrap" style="padding:0"><div class="row"><div class="brand">${LOGO}<div style="min-width:0"><h3>${esc(me.pharmacies.name)}</h3><div style="font-size:12px;opacity:.85">${esc(me.full_name)} • ${isMgr() ? 'مدير 👑' : 'موظف'}</div></div></div>
   <button class="sm sec" id="lo">خروج</button></div>
   <div class="stats"><div>المتبقي<b>${fmt(rem)}</b></div><div>المسدد<b>${fmt(paid)}</b></div><div>متأخر<b>${late}</b></div></div></div></div>
   <div class="wrap"><input id="qs" placeholder="🔍 ابحث بالاسم أو الهاتف" value="${esc(q)}">
   <div style="margin-top:10px">${f.map(d => {
     const lt = d.remaining > 0 && d.due_date && d.due_date < today();
-    return `<div class="card" data-d="${d.id}" style="cursor:pointer"><div class="row"><b>${esc(d.name)}</b>
-    <span class="badge ${d.remaining == 0 ? 'ok' : lt ? 'late' : ''}">${d.remaining == 0 ? 'مسدد ✓' : fmt(d.remaining)}</span></div>
-    <div class="mut" dir="ltr" style="text-align:right">${esc(d.phone)}${d.due_date ? ' • ' + esc(d.due_date) : ''}</div></div>`;
-  }).join('') || '<div class="card mut">لا توجد سجلات</div>'}</div></div>
+    return `<div class="card item" data-d="${d.id}" style="cursor:pointer"><div class="av ${d.remaining == 0 ? 'ok' : lt ? 'late' : ''}">${esc([...(d.name || '؟')][0])}</div>
+    <div class="mid"><b>${esc(d.name)}</b><div class="mut" dir="ltr" style="text-align:right">${esc(d.phone)}${d.due_date ? ' • ' + esc(d.due_date) : ''}</div></div>
+    <span class="badge ${d.remaining == 0 ? 'ok' : lt ? 'late' : ''}">${d.remaining == 0 ? 'مسدد ✓' : fmt(d.remaining)}</span></div>`;
+  }).join('') || '<div class="empty"><div class="big">📋</div>لا توجد سجلات بعد<br>اضغط «+ دين جديد» للبدء</div>'}</div></div>
   <div class="bar"><div class="wrap"><button id="nw">+ دين جديد</button>${isMgr() ? '<button class="sec" id="sf" style="width:40%">الموظفون</button>' : ''}</div></div>`;
   $('lo').onclick = async () => { await sb.auth.signOut(); me = null; render(); };
   $('nw').onclick = () => go('new');
