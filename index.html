@@ -64,7 +64,7 @@ const sb = supabase.createClient(SB_URL, SB_KEY);
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = n => Number(n || 0).toLocaleString('en-US') + ' د.ع';
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const toEmail = p => p.replace(/\D/g, '') + '@pharmacy.app';
 let me = null, debtors = [], view = 'list', current = null, authMode = 'login', msg = '', q = '';
 const isMgr = () => me && me.role === 'manager';
@@ -93,6 +93,7 @@ function render() {
   if (view === 'new') return newHtml(app);
   if (view === 'detail') return detailHtml(app);
   if (view === 'staff') return staffHtml(app);
+  if (view === 'report') return reportHtml(app);
 }
 
 /* ---------- Receipts ---------- */
@@ -191,10 +192,10 @@ function listHtml(app) {
     <div class="mid"><b>${esc(d.name)}</b><div class="mut" dir="ltr" style="text-align:right">${esc(d.phone)}${d.due_date ? ' • ' + esc(d.due_date) : ''}</div></div>
     <span class="badge ${d.remaining == 0 ? 'ok' : lt ? 'late' : ''}">${d.remaining == 0 ? 'مسدد ✓' : fmt(d.remaining)}</span></div>`;
   }).join('') || '<div class="empty"><div class="big">📋</div>لا توجد سجلات بعد<br>اضغط «+ دين جديد» للبدء</div>'}</div></div>
-  <div class="bar"><div class="wrap"><button id="nw">+ دين جديد</button>${isMgr() ? '<button class="sec" id="sf" style="width:40%">الموظفون</button>' : ''}</div></div>`;
+  <div class="bar"><div class="wrap"><button id="nw">+ دين جديد</button>${isMgr() ? '<button class="sec" id="rp" style="width:30%">📊 الجرد</button><button class="sec" id="sf" style="width:34%">الموظفون</button>' : ''}</div></div>`;
   $('lo').onclick = async () => { await sb.auth.signOut(); me = null; render(); };
   $('nw').onclick = () => go('new');
-  if (isMgr()) $('sf').onclick = () => go('staff');
+  if (isMgr()) { $('sf').onclick = () => go('staff'); $('rp').onclick = () => go('report'); }
   $('qs').oninput = e => { q = e.target.value; const p = e.target.selectionStart; render(); $('qs').focus(); $('qs').setSelectionRange(p, p); };
   app.querySelectorAll('[data-d]').forEach(c => c.onclick = () => go('detail', debtors.find(d => d.id === c.dataset.d)));
 }
@@ -218,7 +219,7 @@ function newHtml(app) {
     const base = { pharmacy_id: me.pharmacy_id, created_by: me.id };
     const { data: d, error } = await sb.from('debtors').insert({ ...base, name: $('n').value.trim(), phone: $('p').value.trim(), due_date: $('du').value || null }).select().single();
     if (error) { msg = error.message; return render(); }
-    const t = await sb.from('transactions').insert({ ...base, debtor_id: d.id, type: 'debt', amount: Number($('a').value), due_date: $('du').value || null, notes: $('no').value.trim() || null, receipt_path: rp });
+    const t = await sb.from('transactions').insert({ ...base, debtor_id: d.id, type: 'debt', tx_date: today(), amount: Number($('a').value), due_date: $('du').value || null, notes: $('no').value.trim() || null, receipt_path: rp });
     if (t.error) { msg = t.error.message; return render(); }
     await loadDebtors(); go('list');
   };
@@ -253,7 +254,7 @@ async function detailHtml(app) {
     if (sbtn.disabled) return; sbtn.disabled = true; sbtn.textContent = 'جاري الحفظ...';
     let rp = null;
     try { rp = await uploadReceipt($('rc').files[0]); } catch (er) { msg = 'تعذر رفع الصورة: ' + er.message; return render(); }
-    const { error } = await sb.from('transactions').insert({ pharmacy_id: me.pharmacy_id, debtor_id: d.id, created_by: me.id, type: $('ty').value, amount: Number($('am').value), notes: $('nt').value.trim() || null, receipt_path: rp });
+    const { error } = await sb.from('transactions').insert({ pharmacy_id: me.pharmacy_id, debtor_id: d.id, created_by: me.id, type: $('ty').value, tx_date: today(), amount: Number($('am').value), notes: $('nt').value.trim() || null, receipt_path: rp });
     if (error) { msg = error.message; return render(); }
     refresh();
   };
@@ -328,6 +329,35 @@ function stmImage(d, rows) {
   y += 36; x.fillStyle = '#be123c'; x.font = 'bold 22px ' + F;
   x.fillText('المتبقي: ' + fmt(d.remaining), W - 24, y);
   return new Promise(r => c.toBlob(r, 'image/png'));
+}
+
+/* ---------- Report (manager) ---------- */
+let rpRange = 'month';
+async function reportHtml(app) {
+  app.innerHTML = '<div class="wrap"><div class="card mut">جاري التحميل...</div></div>';
+  const t = today(), m = t.slice(0, 7) + '-01';
+  let qy = sb.from('transactions').select('type, amount, tx_date, profiles(full_name)').limit(5000);
+  if (rpRange === 'today') qy = qy.eq('tx_date', t);
+  if (rpRange === 'month') qy = qy.gte('tx_date', m);
+  const { data } = await qy;
+  const by = {};
+  (data || []).forEach(x => {
+    const n = x.profiles ? x.profiles.full_name : '—';
+    const s = by[n] || (by[n] = { debt: 0, pay: 0, n: 0 });
+    s.n++;
+    if (x.type === 'debt') s.debt += Number(x.amount); else s.pay += Number(x.amount);
+  });
+  const names = Object.keys(by);
+  const tot = names.reduce((a, k) => ({ debt: a.debt + by[k].debt, pay: a.pay + by[k].pay, n: a.n + by[k].n }), { debt: 0, pay: 0, n: 0 });
+  const tab = (k, l) => `<button type="button" class="${rpRange === k ? 'on' : ''}" data-rg="${k}">${l}</button>`;
+  const bg = 'style="background:var(--bg)"';
+  app.innerHTML = `<div class="wrap"><div class="card"><div class="row"><h3>📊 تقرير الجرد</h3><button class="sm sec" id="bk">رجوع</button></div>
+  <div class="tabs" style="margin-top:12px">${tab('today', 'اليوم')}${tab('month', 'هذا الشهر')}${tab('all', 'الكل')}</div>
+  <div class="stats" style="color:var(--tx)"><div ${bg}>ديون مسجلة<b>${fmt(tot.debt)}</b></div><div ${bg}>تسديدات مستلمة<b>${fmt(tot.pay)}</b></div><div ${bg}>عدد العمليات<b>${tot.n}</b></div></div></div>
+  ${names.map(k => `<div class="card"><div class="row"><b>${esc(k)}</b><span class="mut">${by[k].n} عملية</span></div>
+  <div class="stats" style="color:var(--tx)"><div ${bg}>ديون مسجلة<b style="color:var(--red)">${fmt(by[k].debt)}</b></div><div ${bg}>تسديدات مستلمة<b style="color:var(--pri)">${fmt(by[k].pay)}</b></div></div></div>`).join('') || '<div class="empty"><div class="big">📭</div>لا توجد عمليات بهذه الفترة</div>'}</div>`;
+  $('bk').onclick = () => go('list');
+  app.querySelectorAll('[data-rg]').forEach(b => b.onclick = () => { rpRange = b.dataset.rg; render(); });
 }
 
 /* ---------- Staff (manager) ---------- */
