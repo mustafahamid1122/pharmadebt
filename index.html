@@ -183,7 +183,7 @@ function listHtml(app) {
   const late = debtors.filter(d => d.remaining > 0 && d.due_date && d.due_date < today()).length;
   const f = debtors.filter(d => !q || (d.name + d.phone).toLowerCase().includes(q.toLowerCase()));
   app.innerHTML = `<div class="top"><div class="wrap" style="padding:0"><div class="row"><div class="brand">${LOGO}<div style="min-width:0"><h3>${esc(me.pharmacies.name)}</h3><div style="font-size:12px;opacity:.85">${esc(me.full_name)} • ${isMgr() ? 'مدير 👑' : 'موظف'}</div></div></div>
-  <button class="sm sec" id="lo">خروج</button></div>
+  <div style="display:flex;gap:6px"><button class="sm sec" id="pw" title="تغيير كلمة المرور">🔑</button><button class="sm sec" id="lo">خروج</button></div></div>
   <div class="stats"><div>المتبقي<b>${fmt(rem)}</b></div><div>المسدد<b>${fmt(paid)}</b></div><div>متأخر<b>${late}</b></div></div></div></div>
   <div class="wrap"><input id="qs" placeholder="🔍 ابحث بالاسم أو الهاتف" value="${esc(q)}">
   <div style="margin-top:10px">${f.map(d => {
@@ -194,6 +194,13 @@ function listHtml(app) {
   }).join('') || '<div class="empty"><div class="big">📋</div>لا توجد سجلات بعد<br>اضغط «+ دين جديد» للبدء</div>'}</div></div>
   <div class="bar"><div class="wrap"><button id="nw">+ دين جديد</button>${isMgr() ? '<button class="sec" id="rp" style="width:30%">📊 الجرد</button><button class="sec" id="sf" style="width:34%">الموظفون</button>' : ''}</div></div>`;
   $('lo').onclick = async () => { await sb.auth.signOut(); me = null; render(); };
+  $('pw').onclick = async () => {
+    const p = prompt('اكتب كلمة المرور الجديدة (6 أحرف على الأقل)');
+    if (p === null) return;
+    if (p.length < 6) return alert('كلمة المرور قصيرة، لازم 6 أحرف على الأقل');
+    const { error } = await sb.auth.updateUser({ password: p });
+    alert(error ? 'تعذر التغيير: ' + error.message : 'تم تغيير كلمة المرور ✓');
+  };
   $('nw').onclick = () => go('new');
   if (isMgr()) { $('sf').onclick = () => go('staff'); $('rp').onclick = () => go('report'); }
   $('qs').oninput = e => { q = e.target.value; const p = e.target.selectionStart; render(); $('qs').focus(); $('qs').setSelectionRange(p, p); };
@@ -239,7 +246,7 @@ async function detailHtml(app) {
   <input id="am" required type="number" min="250" step="250" placeholder="المبلغ" inputmode="numeric"><input id="nt" placeholder="ملاحظات"><label class="mut">صورة الوصل (اختياري)</label><input id="rc" type="file" accept="image/*"><button type="submit">حفظ العملية</button></form>
   ${d.remaining > 0 ? `<a href="https://wa.me/${wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener"><button type="button" class="amb">💬 تذكير واتساب</button></a>` : ''}
   <button type="button" class="sec" id="st">🖨️ كشف حساب</button>
-  ${isMgr() ? '<button class="red" id="dd">🗑️ حذف الزبون (مدير)</button>' : ''}<div class="err">${esc(msg)}</div></div>
+  ${isMgr() ? '<button class="sec" id="ed">✏️ تعديل الاسم والهاتف</button><button class="red" id="dd">🗑️ حذف الزبون (مدير)</button>' : ''}<div class="err">${esc(msg)}</div></div>
   ${(txs || []).map(t => `<div class="card"><div class="row"><span class="badge ${t.type === 'payment' ? 'ok' : 'late'}">${t.type === 'payment' ? 'دفعة' : 'دين'}</span><b>${fmt(t.amount)}</b></div>
   <div class="mut">${esc(t.notes || '—')}<br>${esc(t.tx_date)} • ${esc(t.profiles ? t.profiles.full_name : '')}</div>
   ${t.receipt_path ? `<button type="button" class="sm sec" data-r="${esc(t.receipt_path)}" style="margin-top:8px">🧾 عرض الوصل</button>` : ''}
@@ -262,6 +269,15 @@ async function detailHtml(app) {
     if (!confirm('حذف هذه العملية؟')) return;
     await sb.from('transactions').delete().eq('id', b.dataset.x); refresh();
   });
+  if (isMgr()) $('ed').onclick = async () => {
+    const n = prompt('اسم الزبون', d.name);
+    if (n === null || !n.trim()) return;
+    const ph = prompt('رقم الهاتف', d.phone);
+    if (ph === null || !ph.trim()) return;
+    const { error } = await sb.from('debtors').update({ name: n.trim(), phone: ph.trim() }).eq('id', d.id);
+    if (error) { msg = error.message; return render(); }
+    await refresh();
+  };
   if (isMgr()) $('dd').onclick = async () => {
     if (!confirm('حذف الزبون وكل سجلاته؟')) return;
     await sb.from('debtors').delete().eq('id', d.id); await loadDebtors(); go('list');
