@@ -27,6 +27,7 @@ button.sm{width:auto;padding:6px 12px;margin:0;font-size:13px}
 .mut{color:var(--mut);font-size:13px}.err{color:var(--red);font-size:13px;margin-top:8px}
 .bar{position:fixed;bottom:0;inset-inline:0;background:var(--card);border-top:1px solid var(--bd);padding:8px 12px calc(env(safe-area-inset-bottom) + 8px)}
 .bar .wrap{padding:0;display:flex;gap:8px}.bar button{margin:0}
+@media print{body>*:not(#stm){display:none!important}#stm{position:static!important;background:#fff!important;padding:0!important}.noprint{display:none!important}}
 </style>
 </head>
 <body>
@@ -211,6 +212,7 @@ async function detailHtml(app) {
   <form id="tf"><select id="ty"><option value="payment">تسديد دفعة</option><option value="debt">إضافة دين</option></select>
   <input id="am" required type="number" min="250" step="250" placeholder="المبلغ" inputmode="numeric"><input id="nt" placeholder="ملاحظات"><label class="mut">صورة الوصل (اختياري)</label><input id="rc" type="file" accept="image/*"><button type="submit">حفظ العملية</button></form>
   ${d.remaining > 0 ? `<a href="https://wa.me/${wa}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener"><button type="button" class="amb">💬 تذكير واتساب</button></a>` : ''}
+  <button type="button" class="sec" id="st">🖨️ كشف حساب</button>
   ${isMgr() ? '<button class="red" id="dd">🗑️ حذف الزبون (مدير)</button>' : ''}<div class="err">${esc(msg)}</div></div>
   ${(txs || []).map(t => `<div class="card"><div class="row"><span class="badge ${t.type === 'payment' ? 'ok' : 'late'}">${t.type === 'payment' ? 'دفعة' : 'دين'}</span><b>${fmt(t.amount)}</b></div>
   <div class="mut">${esc(t.notes || '—')}<br>${esc(t.tx_date)} • ${esc(t.profiles ? t.profiles.full_name : '')}</div>
@@ -218,6 +220,7 @@ async function detailHtml(app) {
   ${isMgr() ? `<button class="sm red" data-x="${t.id}" style="margin-top:8px">حذف</button>` : ''}</div>`).join('')}</div>`;
   $('bk').onclick = async () => { await loadDebtors(); go('list'); };
   app.querySelectorAll('[data-r]').forEach(b => b.onclick = () => showReceipt(b.dataset.r));
+  $('st').onclick = () => openStatement(d, txs || []);
   const refresh = async () => { await loadDebtors(); current = debtors.find(x => x.id === d.id); current ? render() : go('list'); };
   $('tf').onsubmit = async e => {
     e.preventDefault();
@@ -237,6 +240,69 @@ async function detailHtml(app) {
     if (!confirm('حذف الزبون وكل سجلاته؟')) return;
     await sb.from('debtors').delete().eq('id', d.id); await loadDebtors(); go('list');
   };
+}
+
+/* ---------- Statement ---------- */
+function openStatement(d, txs) {
+  const rows = [...txs].reverse();
+  const th = 'text-align:right;padding:6px';
+  const o = document.createElement('div');
+  o.id = 'stm';
+  o.style.cssText = 'position:fixed;inset:0;background:#000b;z-index:9;overflow:auto;padding:12px';
+  o.innerHTML = `<div class="wrap" style="padding:0"><div style="background:#fff;color:#111;border-radius:14px;padding:16px">
+  <h3 style="color:#047857">${esc(me.pharmacies.name)} — كشف حساب</h3>
+  <div style="font-size:13px;color:#555">${esc(today())}${me.pharmacies.whatsapp ? ' • واتساب: ' + esc(me.pharmacies.whatsapp) : ''}</div>
+  <hr style="border:0;border-top:1px solid #e2e8f0;margin:10px 0">
+  <div><b>${esc(d.name)}</b> <span dir="ltr">${esc(d.phone)}</span></div>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px">
+  <tr style="background:#f1f5f9"><th style="${th}">التاريخ</th><th style="${th}">العملية</th><th style="${th}">البيان</th><th style="${th}">المبلغ</th></tr>
+  ${rows.map(t => `<tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px">${esc(t.tx_date)}</td>
+  <td style="padding:6px;color:${t.type === 'debt' ? '#be123c' : '#047857'};font-weight:700">${t.type === 'debt' ? 'دين' : 'دفعة'}</td>
+  <td style="padding:6px">${esc(t.notes || '—')}</td><td style="padding:6px;font-weight:700">${fmt(t.amount)}</td></tr>`).join('')}
+  </table>
+  <div style="margin-top:12px;font-size:14px">الدين: ${fmt(d.total_debt)} • المسدد: ${fmt(d.total_paid)}<br>
+  <b style="color:#be123c;font-size:17px">المتبقي: ${fmt(d.remaining)}</b></div></div>
+  <div class="noprint" style="margin-top:10px">
+  <button id="stP">🖨️ طباعة / حفظ PDF</button><button id="stI" class="amb">📤 مشاركة كصورة</button><button id="stC" class="sec">إغلاق</button></div></div>`;
+  document.body.appendChild(o);
+  $('stC').onclick = () => o.remove();
+  $('stP').onclick = () => window.print();
+  $('stI').onclick = async () => {
+    const blob = await stmImage(d, rows);
+    const f = new File([blob], 'statement.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) {
+      try { await navigator.share({ files: [f] }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'statement.png'; a.click();
+  };
+}
+function stmImage(d, rows) {
+  const W = 700, H = 280 + rows.length * 44 + 90;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  const F = 'system-ui,-apple-system,sans-serif';
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  x.direction = 'rtl'; x.textAlign = 'right';
+  x.fillStyle = '#047857'; x.fillRect(0, 0, W, 70);
+  x.fillStyle = '#fff'; x.font = 'bold 24px ' + F;
+  x.fillText(me.pharmacies.name + ' — كشف حساب', W - 24, 44);
+  x.fillStyle = '#111'; x.font = 'bold 20px ' + F;
+  x.fillText(d.name + '  ' + d.phone, W - 24, 112);
+  x.fillStyle = '#555'; x.font = '15px ' + F;
+  x.fillText('تاريخ الإصدار: ' + today(), W - 24, 140);
+  let y = 190;
+  rows.forEach((t, i) => {
+    x.fillStyle = i % 2 ? '#fff' : '#f1f5f9'; x.fillRect(16, y - 26, W - 32, 40);
+    x.fillStyle = t.type === 'debt' ? '#be123c' : '#047857'; x.font = 'bold 15px ' + F;
+    x.fillText((t.tx_date + '  ' + (t.type === 'debt' ? 'دين' : 'دفعة') + '  ' + fmt(t.amount) + '  ' + (t.notes || '')).slice(0, 70), W - 26, y);
+    y += 44;
+  });
+  y += 24; x.fillStyle = '#111'; x.font = 'bold 17px ' + F;
+  x.fillText('الدين ' + fmt(d.total_debt) + ' • المسدد ' + fmt(d.total_paid), W - 24, y);
+  y += 36; x.fillStyle = '#be123c'; x.font = 'bold 22px ' + F;
+  x.fillText('المتبقي: ' + fmt(d.remaining), W - 24, y);
+  return new Promise(r => c.toBlob(r, 'image/png'));
 }
 
 /* ---------- Staff (manager) ---------- */
